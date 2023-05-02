@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from Task import Task
 from WorldInfo import WorldInfo
+from scipy import interpolate
+import B_spline
 
 
 class CBBA(object):
@@ -74,7 +76,7 @@ class CBBA(object):
             print(e)
 
     def settings(self, AgentList: list, TaskList: list, WorldInfoInput: WorldInfo,
-                 max_depth: int, time_window_flag: bool):
+                 max_depth: int, time_window_flag: bool, obsList=None):
         """
         Initialize some lists given new AgentList, TaskList, and WorldInfoInput.
         """
@@ -86,6 +88,7 @@ class CBBA(object):
 
         self.AgentList = AgentList
         self.TaskList = TaskList
+        self.obsList = obsList
 
         # world information
         self.WorldInfo = WorldInfoInput
@@ -113,13 +116,14 @@ class CBBA(object):
             self.agent_index_list.append(self.AgentList[n].agent_id)
 
     def solve(self, AgentList: list, TaskList: list, WorldInfoInput: WorldInfo,
-              max_depth: int, time_window_flag: bool):
+              max_depth: int, time_window_flag: bool, obsList=None):
         """
         Main CBBA Function
         """
-
+        if len(TaskList) == 0:
+            return [], []
         # Initialize some lists given AgentList, TaskList, and WorldInfoInput.
-        self.settings(AgentList, TaskList, WorldInfoInput, max_depth, time_window_flag)
+        self.settings(AgentList, TaskList, WorldInfoInput, max_depth, time_window_flag, obsList=obsList)
 
         # Initialize working variables
         # Current iteration
@@ -156,6 +160,7 @@ class CBBA(object):
             else:
                 # Maintain loop
                 iter_idx += 1
+                print(iter_idx)
 
         # Map path and bundle values to actual task indices
         for n in range(self.num_agents):
@@ -192,7 +197,6 @@ class CBBA(object):
 
         self.scores_list = [list(filter(lambda a: a != -1, self.scores_list[i]))
                             for i in range(len(self.scores_list))]
-
         return self.path_list, self.times_list
 
     def bundle(self, idx_agent: int):
@@ -537,6 +541,7 @@ class CBBA(object):
         self.winner_bid_list = copy.deepcopy(y)
         return time_mat_new
 
+
     def compute_bid(self, idx_agent: int, feasibility: list):
         """
         Computes bids for each task. Returns bids, best index for task in
@@ -576,23 +581,30 @@ class CBBA(object):
                         if feasibility[idx_task][j] == 1:
                             # Check new path feasibility, true to skip this iteration, false to be feasible
                             skip_flag = False
-
+                            task_prev = []
+                            time_prev = []
+                            task_next = []
+                            time_next = []
                             if j == 0:
                                 # insert at the beginning
-                                task_prev = []
-                                time_prev = []
+                                pass
                             else:
-                                Task_temp = self.TaskList[self.path_list[idx_agent][j-1]]
-                                task_prev = Task(**Task_temp.__dict__)
-                                time_prev = self.times_list[idx_agent][j-1]
+                                temp = j
+                                while temp >0:
+                                    Task_temp = self.TaskList[self.path_list[idx_agent][temp-1]]
+                                    task_prev.append(Task(**Task_temp.__dict__))
+                                    time_prev.append(self.times_list[idx_agent][temp-1])
+                                    temp -= 1
                             
                             if j == (empty_task_index_list[0]):
-                                task_next = []
-                                time_next = []
+                                pass
                             else:
-                                Task_temp = self.TaskList[self.path_list[idx_agent][j]]
-                                task_next = Task(**Task_temp.__dict__)
-                                time_next = self.times_list[idx_agent][j]
+                                temp = j
+                                while temp <= empty_task_index_list[0]:
+                                    Task_temp = self.TaskList[self.path_list[idx_agent][temp]]
+                                    task_next.append(Task(**Task_temp.__dict__))
+                                    time_next.append(self.times_list[idx_agent][j])
+                                    temp += 1
 
                             # Compute min and max start times and score
                             Task_temp = self.TaskList[idx_task]
@@ -637,10 +649,40 @@ class CBBA(object):
         """
         Compute marginal score of doing a task and returns the expected start time for the task.
         """
-
+        # print(f'task_prev: {task_prev}')
+        # print(f'task_next: {task_next}')
         if (self.AgentList[idx_agent].agent_type == self.agent_types.index("quad")) or \
                 (self.AgentList[idx_agent].agent_type == self.agent_types.index("car")):
-            
+            Js = 0
+            Jd = 0
+            Jt = 0
+            num = 20
+            dem=1; ar=3*dem; br=-3*dem**2;cr=dem**3
+            al=ar;bl=-br;cl=cr
+            if (len(task_prev) > 1) and (len(task_next)> 1): 
+                x = [task_prev[1].x, task_prev[0].x, task_current.x, task_next[0].x, task_next[1].x]
+                y = [task_prev[1].y, task_prev[0].y, task_current.y, task_next[0].y, task_next[1].y]
+                print(x)
+                print(y)
+                rix, riy, heading, curvature, spl_i_x, spl_i_y,sampled = B_spline.interpolate_b_spline_path(
+                            x, y, num, 3)
+                accel = [spl_i_x.derivative(2)(sampled),spl_i_y.derivative(2)(sampled)]
+                jerk = [spl_i_x.derivative(3)(sampled),spl_i_y.derivative(3)(sampled)]
+                norm_acc = np.sum(np.linalg.norm(accel,axis=0))/num**2
+                norm_jerk = np.sum(np.linalg.norm(jerk, axis=0))/num**3
+                Js =  norm_acc+norm_jerk
+
+            elif (len(task_prev) > 0) and (len(task_next) > 0): 
+                x = [task_prev[0].x, task_current.x, task_next[0].x]
+                y = [task_prev[0].y, task_current.y, task_next[0].y]
+                rix, riy,heading, curvature, spl_i_x, spl_i_y,sampled = B_spline.interpolate_b_spline_path(
+                            x, y, 20, 2)
+                accel = [spl_i_x.derivative(2)(sampled),spl_i_y.derivative(2)(sampled)]
+                norm_acc = np.sum(np.linalg.norm(accel,axis=0))/num**2
+                Js = norm_acc 
+            else:
+                pass
+                
             if not task_prev:
                 # First task in path
                 # Compute start time of task
@@ -650,10 +692,10 @@ class CBBA(object):
                 min_start = max(task_current.start_time, self.AgentList[idx_agent].availability + dt)
             else:
                 # Not first task in path
-                dt = math.sqrt((task_prev.x-task_current.x)**2 + (task_prev.y-task_current.y)**2 +
-                               (task_prev.z-task_current.z)**2) / self.AgentList[idx_agent].nom_velocity
+                dt = math.sqrt((task_prev[0].x-task_current.x)**2 + (task_prev[0].y-task_current.y)**2 +
+                               (task_prev[0].z-task_current.z)**2) / self.AgentList[idx_agent].nom_velocity
                 # i have to have time to do task at j-1 and go to task m
-                min_start = max(task_current.start_time, time_prev + task_prev.duration + dt)
+                min_start = max(task_current.start_time, time_prev[0] + task_prev[0].duration + dt)
 
             if not task_next:
                 # Last task in path
@@ -661,35 +703,36 @@ class CBBA(object):
                 max_start = task_current.end_time
             else:
                 # Not last task, check if we can still make promised task
-                dt = math.sqrt((task_next.x-task_current.x)**2 + (task_next.y-task_current.y)**2 +
-                               (task_next.z-task_current.z)**2) / self.AgentList[idx_agent].nom_velocity
+                dt = math.sqrt((task_next[0].x-task_current.x)**2 + (task_next[0].y-task_current.y)**2 +
+                               (task_next[0].z-task_current.z)**2) / self.AgentList[idx_agent].nom_velocity
                 # i have to have time to do task m and fly to task at j+1
-                max_start = min(task_current.end_time, time_next - task_current.duration - dt)
+                max_start = min(task_current.end_time, time_next[0] - task_current.duration - dt) 
 
             # Compute score
             if self.time_window_flag:
+                print(self.time_window_flag)
                 # if tasks have time window
                 reward = task_current.task_value * \
                          math.exp((-task_current.discount) * (min_start-task_current.start_time))
             else:
-                # no time window for tasks
+                # # no time window for tasks
                 dt_current = math.sqrt((self.AgentList[idx_agent].x-task_current.x)**2 +
                                        (self.AgentList[idx_agent].y-task_current.y)**2 +
                                        (self.AgentList[idx_agent].z-task_current.z)**2) / \
                              self.AgentList[idx_agent].nom_velocity
 
-                reward = task_current.task_value * math.exp((-task_current.discount) * dt_current)
+                reward = task_current.task_value * math.exp((-task_current.discount) * dt_current) - Js*100
 
             # # Subtract fuel cost. Implement constant fuel to ensure DMG (diminishing marginal gain).
             # # This is a fake score since it double-counts fuel. Should not be used when comparing to optimal score.
             # # Need to compute real score of CBBA paths once CBBA algorithm has finished running.
-            # penalty = self.AgentList[idx_agent].fuel * math.sqrt(
-            #     (self.AgentList[idx_agent].x-task_current.x)**2 + (self.AgentList[idx_agent].y-task_current.y)**2 +
-            #     (self.AgentList[idx_agent].z-task_current.z)**2)
-            #
-            # score = reward - penalty
+            penalty = self.AgentList[idx_agent].fuel * math.sqrt(
+                (self.AgentList[idx_agent].x-task_current.x)**2 + (self.AgentList[idx_agent].y-task_current.y)**2 +
+                (self.AgentList[idx_agent].z-task_current.z)**2)
+            
+            score = reward - penalty
 
-            score = reward
+            # score = reward
         else:
             # FOR USER TO DO:  Define score function for specialized agents, for example:
             # elseif(agent.type == CBBA_Params.AGENT_TYPES.NEW_AGENT), ...  
@@ -737,6 +780,7 @@ class CBBA(object):
             ax_3d.text(self.AgentList[n].x+offset, self.AgentList[n].y+offset, 0.1, "A"+str(n))
 
             # if the path is not empty
+            
             if self.path_list[n]:
                 Task_prev = self.lookup_task(self.path_list[n][0])
                 ax_3d.plot3D([self.AgentList[n].x, Task_prev.x], [self.AgentList[n].y, Task_prev.y],
@@ -755,6 +799,25 @@ class CBBA(object):
                                      [self.times_list[n][m], self.times_list[n][m]+Task_next.duration],
                                      linewidth=2, color=color_str)
                         Task_prev = Task(**Task_next.__dict__)
+
+            # if self.path_list[n]:
+            #     Task_prev = self.lookup_task(self.path_list[n][0])
+            #     ax_3d.plot3D([self.AgentList[n].x, Task_prev.x], [self.AgentList[n].y, Task_prev.y],
+            #                  [0, self.times_list[n][0]], linewidth=2, color=color_str)
+            #     ax_3d.plot3D([Task_prev.x, Task_prev.x], [Task_prev.y, Task_prev.y],
+            #                  [self.times_list[n][0], self.times_list[n][0]+Task_prev.duration],
+            #                  linewidth=2, color=color_str)
+
+            #     for m in range(1, len(self.path_list[n])):
+            #         if self.path_list[n][m] > -1:
+            #             Task_next = self.lookup_task(self.path_list[n][m])
+            #             ax_3d.plot3D([Task_prev.x, Task_next.x], [Task_prev.y, Task_next.y],
+            #                          [self.times_list[n][m-1]+Task_prev.duration, self.times_list[n][m]],
+            #                          linewidth=2, color=color_str)
+            #             ax_3d.plot3D([Task_next.x, Task_next.x], [Task_next.y, Task_next.y],
+            #                          [self.times_list[n][m], self.times_list[n][m]+Task_next.duration],
+            #                          linewidth=2, color=color_str)
+            #             Task_prev = Task(**Task_next.__dict__)
         
         plt.title('Agent Paths with Time Windows')
         ax_3d.set_xlabel("X")
@@ -847,15 +910,20 @@ class CBBA(object):
 
             # if the path is not empty
             if self.path_list[n]:
-                Task_prev = self.lookup_task(self.path_list[n][0])
+                Task_prev, ind = self.lookup_task(self.path_list[n][0])
+                # print(self.AgentList[n].x)
                 ax.plot([self.AgentList[n].x, Task_prev.x], [self.AgentList[n].y, Task_prev.y],
                         linewidth=2, color=color_str)
                 for m in range(1, len(self.path_list[n])):
                     if self.path_list[n][m] > -1:
-                        Task_next = self.lookup_task(self.path_list[n][m])
+                        Task_next, ind = self.lookup_task(self.path_list[n][m])
                         ax.plot([Task_prev.x, Task_next.x], [Task_prev.y, Task_next.y], linewidth=2, color=color_str)
                         Task_prev = Task(**Task_next.__dict__)
-        
+        if self.obsList:
+            for obs in self.obsList:
+                circle = plt.Circle((obs.x, obs.y), obs.r)
+                ax.add_patch(circle)
+                
         plt.title('Agent Paths without Time Windows')
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
@@ -913,8 +981,9 @@ class CBBA(object):
             if self.TaskList[m].task_id == task_id:
                 Task_temp = self.TaskList[m]
                 TaskOutput.append(Task(**Task_temp.__dict__))
+                break
 
         if not TaskOutput:
             raise Exception("Task " + str(task_id) + " not found!")
 
-        return TaskOutput[0]
+        return TaskOutput[0], m

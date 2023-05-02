@@ -3,10 +3,11 @@ import random
 import numpy as np
 from Agent import Agent
 from Task import Task
+from Obstacle import Obstacle
 from WorldInfo import WorldInfo
 
 
-def create_agents_and_tasks(num_agents: int, num_tasks: int, WorldInfoInput: WorldInfo, config_data):
+def create_agents_and_tasks_and_obstacles(num_agents: int, num_tasks: int, num_obs:int, WorldInfoInput: WorldInfo, config_data):
     """
     Generate agents and tasks based on a json configuration file.
 
@@ -63,10 +64,29 @@ def create_agents_and_tasks(num_agents: int, num_tasks: int, WorldInfoInput: Wor
     task_rescue_default.end_time = float(config_data["RESCUE_DEFAULT"]["END_TIME"])
     # task default duration (sec)
     task_rescue_default.duration = float(config_data["RESCUE_DEFAULT"]["DURATION"])
-
+    
     # create empty list, each element is a dataclass Agent() or Task()
     AgentList = []
     TaskList = []
+    obsList = []
+
+    for idx_obs in range(0, num_obs):
+        
+        r = 1
+        x = random.uniform(WorldInfoInput.limit_x[0], WorldInfoInput.limit_x[1])
+        y = random.uniform(WorldInfoInput.limit_y[0], WorldInfoInput.limit_y[1])
+        obs = Obstacle()
+        obs.x = x
+        obs.y = y
+        obs.r = r
+        if idx_obs >0:
+            while check_collision(obsList, obs):
+                x = random.uniform(WorldInfoInput.limit_x[0], WorldInfoInput.limit_x[1])
+                y = random.uniform(WorldInfoInput.limit_y[0], WorldInfoInput.limit_y[1])
+                obs.x = x
+                obs.y = y
+
+        obsList.append(obs)
 
     # create random agents
     for idx_agent in range(0, num_agents):
@@ -80,6 +100,10 @@ def create_agents_and_tasks(num_agents: int, num_tasks: int, WorldInfoInput: Wor
         AgentList[idx_agent].agent_id = idx_agent
         AgentList[idx_agent].x = random.uniform(WorldInfoInput.limit_x[0], WorldInfoInput.limit_x[1])
         AgentList[idx_agent].y = random.uniform(WorldInfoInput.limit_y[0], WorldInfoInput.limit_y[1])
+        while check_collision(obsList, AgentList[idx_agent]):
+            AgentList[idx_agent].x = random.uniform(WorldInfoInput.limit_x[0], WorldInfoInput.limit_x[1])
+            AgentList[idx_agent].y = random.uniform(WorldInfoInput.limit_y[0], WorldInfoInput.limit_y[1])
+                
         AgentList[idx_agent].z = 0
 
     # create random tasks (track only)
@@ -94,6 +118,11 @@ def create_agents_and_tasks(num_agents: int, num_tasks: int, WorldInfoInput: Wor
         TaskList[idx_task].x = random.uniform(WorldInfoInput.limit_x[0], WorldInfoInput.limit_x[1])
         TaskList[idx_task].y = random.uniform(WorldInfoInput.limit_y[0], WorldInfoInput.limit_y[1])
         TaskList[idx_task].z = 0
+
+        while check_collision(obsList, TaskList[idx_task]):
+            TaskList[idx_task].x = random.uniform(WorldInfoInput.limit_x[0], WorldInfoInput.limit_x[1])
+            TaskList[idx_task].y = random.uniform(WorldInfoInput.limit_y[0], WorldInfoInput.limit_y[1])
+            
         TaskList[idx_task].start_time = random.uniform(0, max(float(config_data["TRACK_DEFAULT"]["END_TIME"]),
                                                               float(config_data["RESCUE_DEFAULT"]["END_TIME"])) -
                                                        max(float(config_data["TRACK_DEFAULT"]["DURATION"]),
@@ -108,8 +137,13 @@ def create_agents_and_tasks(num_agents: int, num_tasks: int, WorldInfoInput: Wor
         print("Agent " + str(m))
         print(str(AgentList[m].x)+", "+str(AgentList[m].y)+", "+str(AgentList[m].z))
 
-    return AgentList, TaskList
+    return AgentList, TaskList, obsList
 
+def check_collision(obsList, pos):
+    for obs in obsList:
+        if np.linalg.norm([obs.x-pos.x, obs.y-pos.y]) < obs.r:
+            return True
+    return False
 
 def create_agents_and_tasks_homogeneous(num_agents: int, num_tasks: int, WorldInfoInput: WorldInfo, config_data):
     """
